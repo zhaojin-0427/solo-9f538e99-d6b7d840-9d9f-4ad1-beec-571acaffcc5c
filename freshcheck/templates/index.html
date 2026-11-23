@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}生鲜到货排查{% endblock %}
+{% block content %}
+<section class="cards">
+  <div class="card"><span class="num">{{ total_arrivals }}</span><span class="lbl">到货总数</span></div>
+  <div class="card danger"><span class="num">{{ blocked_arrivals }}</span><span class="lbl">受阻</span></div>
+  <div class="card ok"><span class="num">{{ released_arrivals }}</span><span class="lbl">放行</span></div>
+</section>
+
+<h2>分批上传</h2>
+<form class="upload" method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+  <div class="upload-row">
+    <select name="kind" required>
+      <option value="">上传类型…</option>
+      {% for key, meta in kinds.items() %}
+      <option value="{{ key }}">{{ meta.label }}</option>
+      {% endfor %}
+    </select>
+    <input type="file" name="file" accept=".csv,text/csv" required>
+    <button type="submit">上传</button>
+    <button type="submit" formaction="{{ url_for('check') }}" class="ghost">仅预检</button>
+  </div>
+  <p class="hint">
+    同类同号以本次上传为准。文件分行校验，任一行有误整批不入库，保留上次结果。
+    表头可用中文或英文，编码 UTF-8 / GB18030。
+  </p>
+  <ul class="hint">
+    {% for key, meta in kinds.items() %}
+    <li><strong>{{ meta.label }}</strong>：{% for _f, _a, label in meta.columns %}{{ label }}{% if not loop.last %}、{% endif %}{% endfor %}</li>
+    {% endfor %}
+  </ul>
+</form>
+
+<h2>按原因统计受阻到货</h2>
+{% if by_reason %}
+<table>
+  <thead><tr><th>阻断原因</th><th class="num">受阻笔数</th></tr></thead>
+  <tbody>
+    {% for row in by_reason %}
+    <tr><td>{{ row.label }}</td><td class="num">{{ row.count }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">暂无受阻到货。</p>
+{% endif %}
+
+<h2>最近上传批次</h2>
+{% if batches %}
+<table>
+  <thead><tr><th>#</th><th>类型</th><th>文件</th><th class="num">行数</th><th>时间 (UTC)</th><th>结果</th></tr></thead>
+  <tbody>
+    {% for b in batches %}
+    <tr>
+      <td>{{ b.id }}</td><td>{{ b.kind }}</td><td>{{ b.filename }}</td>
+      <td class="num">{{ b.row_count }}</td><td>{{ b.received_at|utc }}</td>
+      <td>
+        {% if b.status == 'committed' %}
+          <span class="badge ok">已生效</span>
+        {% else %}
+          <span class="badge danger">失败 · 保留上次结果</span>
+          {% if b.note %}<div class="hint">{{ b.note }}</div>{% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">尚未上传。</p>
+{% endif %}
+{% endblock %}

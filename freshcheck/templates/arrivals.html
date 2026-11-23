@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}到货查询{% endblock %}
+{% block content %}
+<h2>到货查询</h2>
+<form class="search" method="get" action="{{ url_for('arrivals') }}">
+  <input type="search" name="q" value="{{ query }}" placeholder="到货编号 / 采购行号 / 条码">
+  <button type="submit">查询</button>
+</form>
+{% if rows %}
+<table>
+  <thead>
+    <tr><th>到货编号</th><th>采购行号</th><th>条码</th><th>到货时刻 (UTC)</th><th>状态</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="{{ url_for('arrival_detail', arrival_no=row.arrival_no) }}">{{ row.arrival_no }}</a></td>
+      <td>{{ row.po_line_no }}</td>
+      <td>{{ row.barcode }}</td>
+      <td>{{ row.arrived_at|utc }}</td>
+      <td>
+        {% if row.issue_count == 0 %}
+          <span class="badge ok">放行</span>
+        {% else %}
+          <span class="badge danger">受阻 · {{ row.issue_count }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">没有匹配的到货记录。</p>
+{% endif %}
+{% endblock %}

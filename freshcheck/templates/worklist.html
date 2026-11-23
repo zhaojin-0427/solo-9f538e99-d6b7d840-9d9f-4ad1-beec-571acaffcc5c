@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}待修项{% endblock %}
+{% block content %}
+<h2>待修项</h2>
+<p class="hint">
+  按「阻断原因 + 采购行号 / 条码」列出待修项，每项给出受阻笔数与逐笔明细。
+  同一笔到货两侧都违反时会同时挂到「采购侧」和「条码侧」两张清单（每侧一条原因）。
+  补录或更正任一底层数据后，两份清单与放行状态随之更新。
+</p>
+
+<section class="grid2">
+  <div>
+    <h3>采购/档案侧 · 按采购行号 <span class="pill">{{ purchase_total }}</span></h3>
+    {% if purchase %}
+    <table class="worklist">
+      <thead>
+        <tr><th>采购行号</th><th>阻断原因</th><th class="num">受阻笔数</th></tr>
+      </thead>
+      <tbody>
+        {% for bucket in purchase %}
+        <tr>
+          <td><code>{{ bucket.ref }}</code></td>
+          <td>{{ bucket.reason_label }} <span class="muted-code">({{ bucket.reason }})</span></td>
+          <td class="num">{{ bucket.blocked }}</td>
+        </tr>
+        <tr class="detail-row">
+          <td colspan="3">
+            <details>
+              <summary>明细（{{ bucket.rows|length }} 笔）</summary>
+              <table>
+                <thead><tr><th>到货编号</th><th>采购行号</th><th>条码</th><th>到货时刻</th><th>说明</th><th>处理</th></tr></thead>
+                <tbody>
+                {% for item in bucket.rows %}
+                  <tr>
+                    <td><a href="{{ url_for('arrival_detail', arrival_no=item.arrival_no) }}">{{ item.arrival_no }}</a></td>
+                    <td>{{ item.po_line_no }}</td>
+                    <td>{{ item.barcode }}</td>
+                    <td>{{ item.arrived_at|utc }}</td>
+                    <td>{{ item.detail }}</td>
+                    <td>{% if bucket.reason == 'purchase_line_missing' %}补录采购行{% else %}更正采购约定条码或到货条码{% endif %}</td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">采购侧无待修项。</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <h3>用码/档案侧 · 按条码 <span class="pill">{{ barcode_total }}</span></h3>
+    {% if barcode %}
+    <table class="worklist">
+      <thead>
+        <tr><th>条码</th><th>阻断原因</th><th class="num">受阻笔数</th></tr>
+      </thead>
+      <tbody>
+        {% for bucket in barcode %}
+        <tr>
+          <td><code>{{ bucket.ref }}</code></td>
+          <td>{{ bucket.reason_label }} <span class="muted-code">({{ bucket.reason }})</span></td>
+          <td class="num">{{ bucket.blocked }}</td>
+        </tr>
+        <tr class="detail-row">
+          <td colspan="3">
+            <details>
+              <summary>明细（{{ bucket.rows|length }} 笔）</summary>
+              <table>
+                <thead><tr><th>到货编号</th><th>采购行号</th><th>条码</th><th>到货时刻</th><th>说明</th><th>处理</th></tr></thead>
+                <tbody>
+                {% for item in bucket.rows %}
+                  <tr>
+                    <td><a href="{{ url_for('arrival_detail', arrival_no=item.arrival_no) }}">{{ item.arrival_no }}</a></td>
+                    <td>{{ item.po_line_no }}</td>
+                    <td>{{ item.barcode }}</td>
+                    <td>{{ item.arrived_at|utc }}</td>
+                    <td>{{ item.detail }}</td>
+                    <td>{% if bucket.reason == 'barcode_unowned' %}补录用码记录（覆盖到货时刻）{% else %}拆分/更正用码记录，使该时刻只对应一种商品{% endif %}</td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">条码侧无待修项。</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

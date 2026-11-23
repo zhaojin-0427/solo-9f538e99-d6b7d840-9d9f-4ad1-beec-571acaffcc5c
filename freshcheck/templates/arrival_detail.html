@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}到货 {{ arrival.arrival_no }}{% endblock %}
+{% block content %}
+<h2>到货 <code>{{ arrival.arrival_no }}</code></h2>
+
+<p class="status">
+  {% if released %}
+    <span class="badge ok">当前放行</span> 全部阻断原因已解除。
+  {% else %}
+    <span class="badge danger">当前受阻</span> 共 {{ issues|length }} 条阻断原因，全部解除后才放行。
+  {% endif %}
+</p>
+
+<table class="kv">
+  <tbody>
+    <tr><th>采购行号</th><td>{{ arrival.po_line_no }}</td></tr>
+    <tr><th>扫码条码</th><td>{{ arrival.barcode }}</td></tr>
+    <tr><th>到货时刻 (UTC)</th><td>{{ arrival.arrived_at|utc }}</td></tr>
+    <tr><th>采购约定条码</th><td>{{ purchase_line.agreed_barcode if purchase_line else '—（采购行不存在）' }}</td></tr>
+  </tbody>
+</table>
+
+<h3>阻断原因</h3>
+{% if issues %}
+<table>
+  <thead><tr><th>侧</th><th>原因</th><th>关键值</th><th>说明</th></tr></thead>
+  <tbody>
+    {% for issue in issues %}
+    <tr><td>{{ issue.side_label }}</td><td>{{ issue.reason_label }}</td><td><code>{{ issue.ref }}</code></td><td>{{ issue.detail }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">无阻断原因。</p>
+{% endif %}
+
+<h3>到货时刻覆盖该条码的用码记录</h3>
+<p class="hint">用码期含起点、不含终点；下表即区间 [起, 止) 覆盖 {{ arrival.arrived_at|utc }} 的记录。</p>
+{% if covering_scans %}
+<table>
+  <thead><tr><th>记录编号</th><th>商品</th><th>起 (含)</th><th>止 (不含)</th></tr></thead>
+  <tbody>
+    {% for scan in covering_scans %}
+    <tr><td>{{ scan.record_no }}</td><td>{{ scan.product }}</td><td>{{ scan.starts_at|utc }}</td><td>{{ scan.ends_at|utc }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">无覆盖记录（条码归属缺失）。</p>
+{% endif %}
+
+<p><a href="{{ url_for('arrivals') }}">← 返回到货查询</a></p>
+{% endblock %}
