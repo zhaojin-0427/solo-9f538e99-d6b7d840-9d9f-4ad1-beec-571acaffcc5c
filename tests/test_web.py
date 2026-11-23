@@ -121,3 +121,36 @@ def test_dry_run_checks_without_writing(client):
     ).data.decode()
     assert "预检未通过" in bad
     assert "尚未上传" in client.get("/").data.decode()
+
+
+def test_review_page_navigation_and_empty_form(client):
+    page = client.get("/review").data.decode()
+    assert "入仓时限复盘" in page
+    assert "入仓时限" in client.get("/").data.decode()  # nav link everywhere
+    assert "选择 UTC 起止日期与入仓时限后开始复盘" in page
+
+
+def test_review_page_daily_rollup_and_validation(client):
+    post(client, "arrivals", ARRIVAL)  # A1 blocked on both sides initially
+
+    # Wide enough window that the upload's UTC day is inside it.
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    start = (now - timedelta(days=2)).date().isoformat()
+    end = now.date().isoformat()
+    page = client.get(f"/review?start={start}&end={end}&limit=30").data.decode()
+    assert "到货总笔数" in page
+    assert "仅采购侧受阻" in page and "仅用码侧受阻" in page and "两侧均受阻" in page
+    # The rollup table renders at least one daily row.
+    assert "<tbody>" in page
+
+    # bad parameter combinations are reported, not 500s
+    bad_range = client.get(f"/review?start={end}&end={start}&limit=30").data.decode()
+    assert "截止日期不能早于起始日期" in bad_range
+    bad_limit = client.get(f"/review?start={start}&end={end}&limit=0").data.decode()
+    assert "时限必须是" in bad_limit
+    bad_days = client.get(
+        "/review?start=2026-01-01&end=2026-02-05&limit=30"
+    ).data.decode()  # 36 days inclusive
+    assert "最多 31 天" in bad_days

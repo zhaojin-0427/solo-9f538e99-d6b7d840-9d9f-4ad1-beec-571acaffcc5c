@@ -7,7 +7,7 @@ import os
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 
-from . import service
+from . import review, service
 from .csvio import KINDS
 from .db import DB_PATH, UploadError, display_utc, init_db, read_conn
 
@@ -93,6 +93,42 @@ def arrival_detail(arrival_no: str):
         flash(f"找不到到货编号 {arrival_no}。", "error")
         return redirect(url_for("arrivals"))
     return render_template("arrival_detail.html", **detail)
+
+
+@app.get("/review")
+def deadline_review():
+    """入仓时限复盘：按首次成功上传日期逐日统计到点时各侧受阻笔数。"""
+    start = request.args.get("start", "")
+    end = request.args.get("end", "")
+    limit = request.args.get("limit", "")
+    data = None
+    form_error = None
+    if start or end or limit:
+        try:
+            start_date, end_date, minutes = review.parse_params(start, end, limit)
+        except review.ReviewParamError as exc:
+            form_error = str(exc)
+        else:
+            with read_conn(get_db_path()) as conn:
+                data = review.deadline_daily(conn, start_date, end_date, minutes)
+            data.update(
+                {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "minutes": minutes,
+                }
+            )
+    return render_template(
+        "review.html",
+        start=start,
+        end=end,
+        limit=limit,
+        data=data,
+        form_error=form_error,
+        max_range=review.MAX_RANGE_DAYS,
+        min_limit=review.MIN_LIMIT_MINUTES,
+        max_limit=review.MAX_LIMIT_MINUTES,
+    )
 
 
 @app.post("/check")

@@ -72,3 +72,8 @@ details summary { cursor: pointer; color: var(--accent); padding: 6px 10px; }
 .muted-code { color: var(--muted); font-size: 12.5px; }
 .ghost { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
 .ghost:hover { background: #eaf1f7; }
+
+.review-form { flex-wrap: wrap; align-items: flex-end; }
+.review-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; color: var(--muted); }
+.review-form input { max-width: none; min-width: 180px; }
+.muted-row td { color: var(--muted); }

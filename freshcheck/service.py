@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from . import rules
+from . import review, rules
 from .csvio import KINDS, parse_csv
 from .db import utc_now
 from .sqlutil import chunks, placeholders
@@ -68,6 +68,7 @@ def upload(kind: str, filename: str, raw: bytes, db_path: str | None = None) -> 
 
     display_name = filename or f"{kind}.csv"
     rows: list[dict] = []
+    # Kept for the failed-batch audit row if the transaction never starts.
     now = utc_now()
     batch_id: int | None = None
 
@@ -76,6 +77,10 @@ def upload(kind: str, filename: str, raw: bytes, db_path: str | None = None) -> 
         with transaction(db_path) as conn:
             previous = _existing_keys(conn, kind, rows)
             affected = _affected_arrivals(conn, kind, rows, previous)
+            # The clock starts when this batch starts writing: base tables,
+            # blocking reasons and the deadline-review timeline all use the
+            # same instant and commit together.
+            now = utc_now()
             cursor = conn.execute(
                 "INSERT INTO upload_batches (kind, filename, row_count, received_at, status) "
                 "VALUES (?, ?, ?, ?, 'committed')",
@@ -91,6 +96,7 @@ def upload(kind: str, filename: str, raw: bytes, db_path: str | None = None) -> 
                 payload.append(record)
             conn.executemany(sql, payload)
             rules.recheck_arrivals(conn, affected)
+            review.sync_batch(conn, batch_id, now, affected)
             stats = _summary(conn)
     except Exception as exc:
         # The data transaction rolled back, so base tables, worklists and

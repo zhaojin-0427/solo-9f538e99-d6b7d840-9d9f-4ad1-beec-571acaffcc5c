@@ -17,9 +17,16 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DB_PATH = os.environ.get("FRESHCHECK_DB", os.path.join(os.path.dirname(__file__), "..", "data", "freshcheck.db"))
+
+# Fixed-width storage/parsing format (see parse_utc for why string compares
+# stay chronological in this shape).
+TS_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+# Meta key recording when the deadline-review feature was switched on.
+REVIEW_ENABLED_KEY = "review_enabled_at"
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -79,6 +86,38 @@ CREATE TABLE IF NOT EXISTS upload_batches (
     status          TEXT NOT NULL,             -- 'committed' | 'failed'
     note            TEXT                       -- failure reason, if any
 );
+
+-- Key/value application metadata (feature switch timestamps, ...).
+CREATE TABLE IF NOT EXISTS app_meta (
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL
+);
+
+-- UTC date on which every arrival number first appeared in a *committed*
+-- batch.  Arrivals already present when the deadline-review feature was
+-- switched on are backfilled with first_upload_at < enabled_at, which keeps
+-- them out of the review ("只纳入启用后首次出现的到货编号").
+CREATE TABLE IF NOT EXISTS arrival_first_seen (
+    arrival_no      TEXT PRIMARY KEY,
+    first_upload_at TEXT NOT NULL              -- received_at of the first committed batch
+);
+
+-- Sparse per-arrival timeline of which side blocks it.
+-- A row is written inside a successful batch only when the arrival is new or
+-- its set of blocking sides actually changed ("不按分钟逐项写入"); nothing is
+-- written for failed batches because their whole transaction rolls back.
+--   mask 0 = no side blocked (released)
+--   bit 0 (1) = purchase side, bit 1 (2) = barcode side, 3 = both
+CREATE TABLE IF NOT EXISTS arrival_side_states (
+    arrival_no      TEXT NOT NULL,
+    batch_id        INTEGER NOT NULL,          -- batch whose effects produced this state
+    state_at        TEXT NOT NULL,             -- received_at (write instant) of that batch
+    side_mask       INTEGER NOT NULL,
+    PRIMARY KEY (arrival_no, batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_side_states_lookup
+    ON arrival_side_states (arrival_no, state_at, batch_id);
 """
 
 REASON_LABELS = {
@@ -96,7 +135,13 @@ class UploadError(ValueError):
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).strftime(TS_FMT)
+
+
+def add_minutes(value: str, minutes: int) -> str:
+    """Add an integer number of minutes to a stored fixed-width UTC instant."""
+    parsed = datetime.strptime(value, TS_FMT).replace(tzinfo=timezone.utc)
+    return (parsed + timedelta(minutes=int(minutes))).strftime(TS_FMT)
 
 
 def parse_utc(value: str, field: str) -> str:
@@ -120,7 +165,7 @@ def parse_utc(value: str, field: str) -> str:
     # Fixed width keeps plain string comparison chronological in SQLite,
     # while preserving sub-second precision instead of silently truncating
     # an instant that sits exactly on a window boundary.
-    return parsed.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return parsed.strftime(TS_FMT)
 
 
 def display_utc(value: str) -> str:
@@ -136,6 +181,10 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path or DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Exact fixed-width instant arithmetic for deadline comparisons, so a
+    # correction landing exactly on the deadline is included without fighting
+    # float/julianday boundary errors.
+    conn.create_function("add_minutes", 2, add_minutes, deterministic=True)
     return conn
 
 
@@ -180,6 +229,45 @@ def _migrate(conn: sqlite3.Connection) -> None:
             f"UPDATE {table} SET {column} = substr({column}, 1, 19) || '.000000Z' "
             f"WHERE length({column}) = 20 AND {column} LIKE '%Z'"
         )
+
+    # Switch on the deadline-review feature.  On an existing database every
+    # arrival already there is by definition older than the switch, so its
+    # first-seen row is backfilled with an instant strictly before
+    # enabled_at: the review's "only arrivals first seen after enablement"
+    # filter then excludes them without any special-casing.
+    switched = conn.execute(
+        "SELECT value FROM app_meta WHERE key = ?", (REVIEW_ENABLED_KEY,)
+    ).fetchone()
+    if switched is None:
+        enabled_at = utc_now()
+        conn.execute(
+            "INSERT INTO app_meta (key, value) VALUES (?, ?)",
+            (REVIEW_ENABLED_KEY, enabled_at),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO arrival_first_seen (arrival_no, first_upload_at)
+            SELECT a.arrival_no,
+                   substr(b.received_at, 1, 19) || '.000000Z'
+              FROM arrivals a
+              JOIN upload_batches b ON b.id = a.batch_id
+            """,
+        )
+        # Any arrival whose batch predates the fixed-width format (or whose
+        # batch row is missing) still needs a first-seen row older than the
+        # switch; use a fixed early epoch so it is never picked up.
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO arrival_first_seen (arrival_no, first_upload_at)
+            SELECT arrival_no, '1970-01-01T00:00:00.000000Z'
+              FROM arrivals
+             WHERE arrival_no NOT IN (SELECT arrival_no FROM arrival_first_seen)
+            """,
+        )
+        # DML above opens an implicit transaction under the sqlite3 module's
+        # deferred isolation; commit it explicitly or connection close rolls
+        # the switch (and the backfill) back.
+        conn.commit()
 
 
 @contextmanager

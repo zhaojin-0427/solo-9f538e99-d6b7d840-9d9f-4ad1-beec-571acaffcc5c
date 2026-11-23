@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}入仓时限复盘{% endblock %}
+{% block content %}
+<h2>入仓时限复盘</h2>
+<p class="hint">
+  以每笔到货<strong>首次成功上传的 UTC 日期</strong>逐日统计：入仓时限到点那一刻，
+  到货还卡在哪一侧（仅采购侧 / 仅用码侧 / 两侧均受阻；未受阻的计入总笔数）。
+  计时起点为成功批次开始写入的 UTC 时刻，恰好到点的更正算在内，同一时刻按提交顺序取最后状态。
+  只纳入本功能启用后首次出现的到货编号；只统计日末已满两小时的日期。
+</p>
+
+<form class="search review-form" method="get" action="{{ url_for('deadline_review') }}">
+  <label>起始日期 (UTC)
+    <input type="date" name="start" value="{{ start }}" required>
+  </label>
+  <label>截止日期 (UTC，含首尾，最多 {{ max_range }} 天)
+    <input type="date" name="end" value="{{ end }}" required>
+  </label>
+  <label>入仓时限（分钟，{{ min_limit }}～{{ max_limit }} 的整数）
+    <input type="number" name="limit" value="{{ limit }}" min="{{ min_limit }}" max="{{ max_limit }}" step="1" required>
+  </label>
+  <button type="submit">复盘</button>
+</form>
+
+{% if form_error %}
+<div class="flash error">{{ form_error }}</div>
+{% endif %}
+
+{% if data %}
+<p class="hint">
+  区间 {{ data.start_date }} ～ {{ data.end_date }}（含首尾），时限 {{ data.minutes }} 分钟；
+  可统计到 {{ data.cutoff_day }}（UTC），功能启用时刻 {{ data.enabled_at|utc }}。
+</p>
+{% if data.skipped_days %}
+<p class="hint">以下日期日末尚未满两小时，未纳入统计：{{ data.skipped_days|join('、') }}</p>
+{% endif %}
+{% if data.rows %}
+<table>
+  <thead>
+    <tr>
+      <th>UTC 日期</th>
+      <th class="num">到货总笔数</th>
+      <th class="num">到点时仅采购侧受阻</th>
+      <th class="num">到点时仅用码侧受阻</th>
+      <th class="num">到点时两侧均受阻</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in data.rows %}
+    <tr {% if row.total == 0 %}class="muted-row"{% endif %}>
+      <td>{{ row.day }}</td>
+      <td class="num">{{ row.total }}</td>
+      <td class="num">{{ row.purchase_only }}</td>
+      <td class="num">{{ row.barcode_only }}</td>
+      <td class="num">{{ row.both_blocked }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="hint">
+  统计查询只读汇总表，每个日期执行一条聚合语句，单条最多取 24 条状态记录；
+  受阻侧未发生变化的到货在该批次不重复写入，也没有按分钟的逐项记录。
+</p>
+{% else %}
+<p class="empty">所选区间内没有可统计的日期。</p>
+{% endif %}
+{% else %}
+<p class="empty">选择 UTC 起止日期与入仓时限后开始复盘。</p>
+{% endif %}
+{% endblock %}
